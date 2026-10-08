@@ -21,7 +21,9 @@ SH
 chmod +x "$stage/bin/omarchy-theme-bg-boot-intro"
 cat >"$stage/bin/owe" <<'SH'
 #!/bin/bash
-if [[ -f $INTRO_TEST_FRAME_READY ]]; then
+if [[ -f $INTRO_TEST_FRAME_FAIL ]]; then
+  printf '{"kind":"video","ready":true,"error":"frame render failed"}\n'
+elif [[ -f $INTRO_TEST_FRAME_READY ]]; then
   sleep 0.25
   printf '{"kind":"video","ready":true,"has_transition":false,"time_pos":0.05}\n'
 else
@@ -29,7 +31,7 @@ else
 fi
 SH
 chmod +x "$stage/bin/owe"
-output=$(HOME="$stage/home" PATH="$stage/bin:$PATH" INTRO_TEST_LOG="$stage/starts" INTRO_TEST_COVER="$stage/cover.ppm" INTRO_TEST_FRAME_READY="$stage/video-ready" timeout 10 quickshell -p "$stage" --no-color 2>&1) || fail "background intro fixture exits cleanly" "$output"
+output=$(HOME="$stage/home" PATH="$stage/bin:$PATH" INTRO_TEST_LOG="$stage/starts" INTRO_TEST_COVER="$stage/cover.ppm" INTRO_TEST_FRAME_READY="$stage/video-ready" INTRO_TEST_FRAME_FAIL="$stage/video-fail" timeout 10 quickshell -p "$stage" --no-color 2>&1) || fail "background intro fixture exits cleanly" "$output"
 [[ $output == *"RESULT pass"* ]] || fail "background intro lifecycle assertions pass" "$output"
 if rg -q 'RESULT fail|ReferenceError|TypeError|Error:|Unable to assign|Binding loop' <<<"$output"; then
   fail "background intro fixture has no QML errors" "$output"

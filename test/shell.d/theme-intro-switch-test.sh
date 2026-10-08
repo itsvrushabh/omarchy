@@ -167,6 +167,7 @@ TEST_OWE_NO_PREPARE=true set_theme alpha
 wait_command '^owe: intro '
 grep -Fxq "owe: intro --start first-frame $state/theme/backgrounds/intros/2-road.mp4" "$log" || fail "older OWE uses the ordinary intro path"
 pass "older OWE keeps the ordinary intro startup path"
+wait_command '^hypr-reload$'
 
 gates="$test_tmp/gates"
 mkdir "$gates"

@@ -20,6 +20,8 @@ Item {
   property bool checked: false
   property string themeToken: ""
   property string transitionToken: ""
+  property bool fallbackPending: false
+  property int framePollFailures: 0
   readonly property string startupBackgroundPath: Quickshell.env("OMARCHY_STARTUP_BACKGROUND")
   property string themeBackground: sessionConsumed && !Util.isVideoPath(startupBackgroundPath) ? startupBackgroundPath : ""
   property var themeNativeSize: null
@@ -55,7 +57,14 @@ Item {
   }
 
   onDesktopReadyChanged: revealStartup()
-  onBackgroundReadyChanged: finishStartup()
+  onBackgroundReadyChanged: {
+    finishStartup()
+    if (fallbackPending && backgroundReady) {
+      fallbackPending = false
+      fallbackTimeout.stop()
+      revealTheme()
+    }
+  }
   Connections {
     target: root.host && root.host.pluginRegistry ? root.host.pluginRegistry : null
     function onPluginsChanged() { root.finishStartup() }
@@ -64,6 +73,10 @@ Item {
   function prepareTheme(fromPath, token, colors, shell) {
     framePoll.stop()
     themeFade.stop()
+    playbackFallback.stop()
+    fallbackTimeout.stop()
+    fallbackPending = false
+    framePollFailures = 0
     themeToken = token
     transitionToken = token
     if (themeBackground !== fromPath) {
@@ -74,12 +87,45 @@ Item {
     themeShell = shell
     themeOpacity = 1
     themeFallback.restart()
+    if (!backgroundActive && checked) {
+      framePoll.start()
+      if (!frameStatus.running) frameStatus.running = true
+      playbackFallback.restart()
+    }
+  }
+
+  function fallbackTheme() {
+    if (!themeToken && !cover) return
+    framePoll.stop()
+    themeFallback.stop()
+    playbackFallback.stop()
+    framePollFailures = 0
+    var bg = Quickshell.env("HOME") + "/.local/state/omarchy/current/background"
+    Quickshell.execDetached(["omarchy-shell", "background", "setInstant", bg])
+    if (backgroundService) {
+      backgroundService.suspended = false
+      if (typeof backgroundService.setInstant === "function") {
+        backgroundService.setInstant(bg)
+      } else if (typeof backgroundService.setBackground === "function") {
+        backgroundService.setBackground(bg, true)
+      }
+    }
+    if (backgroundReady || !backgroundService) {
+      revealTheme()
+      return
+    }
+    fallbackPending = true
+    fallbackTimeout.restart()
   }
 
   function revealTheme() {
     if (!themeToken && !cover) return
     framePoll.stop()
     themeFallback.stop()
+    playbackFallback.stop()
+    fallbackTimeout.stop()
+    fallbackPending = false
+    framePollFailures = 0
     if (themeToken) {
       Commons.Color.loadColors(Util.decodeBase64(themeColors))
       Commons.Color.loadShell(Util.decodeBase64(themeShell))
@@ -100,11 +146,14 @@ Item {
   }
 
   function finishTheme(token) {
-    if (token === themeToken) revealTheme()
+    if (token === themeToken) {
+      if (fallbackPending) return
+      revealTheme()
+    }
   }
 
   function themeStatus(token) {
-    return token === transitionToken && (themeToken || themeFade.running || startupFade.running) ? "pending" : "ready"
+    return token === transitionToken && (themeToken || fallbackPending || themeFade.running || startupFade.running) ? "pending" : "ready"
   }
 
   function themeCoverStatus(token) {
@@ -120,7 +169,11 @@ Item {
   function cancelTheme() {
     framePoll.stop()
     themeFallback.stop()
+    playbackFallback.stop()
+    fallbackTimeout.stop()
+    fallbackPending = false
     themeFade.stop()
+    framePollFailures = 0
     themeToken = ""
     transitionToken = ""
     themeBackground = ""
@@ -164,7 +217,24 @@ Item {
   Timer {
     id: themeFallback
     interval: 10000
-    onTriggered: root.revealTheme()
+    onTriggered: root.fallbackTheme()
+  }
+
+  Timer {
+    id: playbackFallback
+    interval: 2500
+    onTriggered: root.fallbackTheme()
+  }
+
+  Timer {
+    id: fallbackTimeout
+    interval: 2500
+    onTriggered: {
+      if (root.fallbackPending) {
+        root.fallbackPending = false
+        root.revealTheme()
+      }
+    }
   }
 
   // A renderer left over from another intro can first fade from its still.
@@ -183,11 +253,21 @@ Item {
     onStarted: token = root.themeToken
     stdout: StdioCollector { id: frameStatusOut }
     onExited: function(exitCode) {
-      if (exitCode !== 0 || token !== root.themeToken || (!token && !root.cover)) return
+      if (token !== root.themeToken || (!token && !root.cover)) return
+      if (exitCode !== 0) {
+        root.framePollFailures += 1
+        if (root.framePollFailures >= 20) root.fallbackTheme()
+        return
+      }
+      root.framePollFailures = 0
       try {
         var status = JSON.parse(frameStatusOut.text)
-        if (status.kind === "video" && status.ready && !status.has_transition && status.time_pos > 0)
+        if (status.kind === "video" && status.ready && !status.has_transition && status.time_pos > 0) {
+          playbackFallback.stop()
           root.revealTheme()
+        } else if (status.error || (status.ready && status.kind && status.kind !== "video")) {
+          root.fallbackTheme()
+        }
       } catch (e) {}
     }
   }
@@ -226,6 +306,7 @@ Item {
       if (cover || themeToken) {
         framePoll.start()
         if (!frameStatus.running) frameStatus.running = true
+        playbackFallback.restart()
       }
     }
   }
@@ -276,7 +357,7 @@ Item {
       readonly property bool coverReady: outgoingFrame.status === Image.Ready && coverFrames >= 2
       readonly property bool coverFailed: outgoingFrame.status === Image.Error
       screen: modelData
-      visible: (!root.startupPending && root.cover) || root.themeBackground !== ""
+      visible: (!root.startupPending && root.cover) || root.themeBackground !== "" || root.fallbackPending
       // Keep the window transparent throughout the fade. Paint the startup
       // color inside it so changing the window format cannot flash black.
       color: "transparent"
@@ -289,7 +370,7 @@ Item {
 
       Rectangle {
         anchors.fill: parent
-        visible: root.cover
+        visible: root.cover || (root.fallbackPending && (!root.themeBackground || panel.coverFailed))
         color: Commons.Color.background
       }
 
@@ -305,9 +386,13 @@ Item {
         }
         fillMode: Image.PreserveAspectCrop
         opacity: root.themeOpacity
-        // Start decoding while the remaining theme configs render.
         asynchronous: true
-        onStatusChanged: panel.coverFrames = 0
+        onStatusChanged: {
+          panel.coverFrames = 0
+          if (status === Image.Error && root.themeToken) {
+            root.fallbackTheme()
+          }
+        }
       }
 
       // Give the ready image a frame to reach the compositor before OWE

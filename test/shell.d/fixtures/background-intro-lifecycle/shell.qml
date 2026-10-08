@@ -16,12 +16,29 @@ ShellRoot {
     }
   }
 
-  QtObject { id: retainedBackground; property bool suspended: false }
+  QtObject {
+    id: retainedBackground
+    property bool suspended: false
+    property bool ready: true
+    property string displayedBackground: ""
+    function setInstant(path) {
+      displayedBackground = path
+      ready = false
+    }
+    function setBackground(path, instant) {
+      displayedBackground = path
+      ready = false
+    }
+  }
   BackgroundIntro { id: intro; host: test }
 
   Process {
     id: revealVideo
     command: ["touch", Quickshell.env("INTRO_TEST_FRAME_READY")]
+  }
+  Process {
+    id: triggerFrameFail
+    command: ["touch", Quickshell.env("INTRO_TEST_FRAME_FAIL")]
   }
 
   Timer {
@@ -109,13 +126,46 @@ ShellRoot {
       intro.prepareTheme("", "failed-theme", Qt.btoa('background = "#654321"'), "")
       intro.finishTheme("failed-theme")
       test.check(Qt.colorEqual(Commons.Color.background, "#654321"), "failed playback still releases its pending palette")
-      intro.prepareTheme("", "cancelled-theme", Qt.btoa('background = "#abcdef"'), "")
-      intro.cancelTheme()
-      intro.finishTheme("cancelled-theme")
-      test.check(Qt.colorEqual(Commons.Color.background, "#654321") && !intro.themeToken, "a superseding theme cannot be overwritten by an older completion")
-      test.check(!intro.cover, "launcher completion leaves the still uncovered")
-      if (!test.failed) console.log("RESULT pass")
-      Qt.quit()
+      retainedBackground.ready = true
+      intro.prepareTheme("", "fallback-theme", Qt.btoa('background = "#998877"'), "")
+      retainedBackground.suspended = true
+      triggerFrameFail.running = true
+      fallbackDeadline = Date.now() + 3000
+      fallbackTimer.start()
+    }
+  }
+  property double fallbackDeadline: 0
+  Timer {
+    id: fallbackTimer
+    interval: 16
+    repeat: true
+    onTriggered: {
+      if (!intro.fallbackPending) {
+        if (Date.now() >= test.fallbackDeadline) {
+          test.check(false, "failing render-status drives fallbackTheme")
+          Qt.quit()
+        }
+        return
+      }
+      stop()
+      test.check(!retainedBackground.suspended, "fallback unsuspends the background service")
+      test.check(!retainedBackground.ready, "replacement wallpaper starts unready")
+      test.check(intro.fallbackPending, "fallback keeps fallbackPending while the replacement wallpaper is loading")
+      test.check(intro.themeStatus("fallback-theme") === "pending", "fallback keeps themeStatus pending while wallpaper is loading")
+      test.check(!Qt.colorEqual(Commons.Color.background, "#998877"), "palette is held while wallpaper is loading")
+      retainedBackground.ready = true
+      Qt.callLater(function() {
+        test.check(!intro.fallbackPending, "becoming ready clears fallbackPending")
+        test.check(Qt.colorEqual(Commons.Color.background, "#998877"), "stalled video intro fallback releases the pending palette once ready")
+        test.check(!intro.themeToken, "fallback leaves the theme token cleared once ready")
+        intro.prepareTheme("", "cancelled-theme", Qt.btoa('background = "#abcdef"'), "")
+        intro.cancelTheme()
+        intro.finishTheme("cancelled-theme")
+        test.check(Qt.colorEqual(Commons.Color.background, "#998877") && !intro.themeToken, "a superseding theme cannot be overwritten by an older completion")
+        test.check(!intro.cover, "launcher completion leaves the still uncovered")
+        if (!test.failed) console.log("RESULT pass")
+        Qt.quit()
+      })
     }
   }
 }

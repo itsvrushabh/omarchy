@@ -232,6 +232,7 @@ Item {
     }
 
     function setInstant(path: string): void {
+      root.suspended = false
       root.setBackground(path, true)
     }
 
