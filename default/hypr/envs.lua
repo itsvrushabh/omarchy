@@ -4,9 +4,13 @@ local require_optional = require("default.hypr.require_optional")
 -- GUM environment variables for styling purposes.
 require_optional.module("omarchy.current.theme.gum_env")
 
--- Cursor size.
-hl.env("XCURSOR_SIZE", "24")
-hl.env("HYPRCURSOR_SIZE", "24")
+-- Cursor theme and size.
+hl.env("XCURSOR_THEME", os.getenv("XCURSOR_THEME") or "default")
+hl.env("XCURSOR_SIZE", os.getenv("XCURSOR_SIZE") or "24")
+hl.env("HYPRCURSOR_SIZE", os.getenv("HYPRCURSOR_SIZE") or "24")
+if os.getenv("HYPRCURSOR_THEME") then
+  hl.env("HYPRCURSOR_THEME", os.getenv("HYPRCURSOR_THEME"))
+end
 
 -- Force all apps to use Wayland.
 hl.env("GDK_BACKEND", "wayland,x11,*")

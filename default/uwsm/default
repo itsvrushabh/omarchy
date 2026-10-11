@@ -10,6 +10,11 @@ export TERMINAL=xdg-terminal-exec
 # Used by terminal programs to open files with the selected Omarchy default editor
 export EDITOR="omarchy-launch-editor --inline"
 
+# Default cursor theme and size
+export XCURSOR_THEME="${XCURSOR_THEME:-default}"
+export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
+export HYPRCURSOR_SIZE="${HYPRCURSOR_SIZE:-24}"
+
 # Use a custom directory for screenshots
 # export OMASNAP_SCREENSHOT_DIR="$HOME/Pictures/Screenshots"
 
